@@ -18,6 +18,8 @@ Defaults compare 2020 with 2022. Each embedding summarises a whole calendar year
 - The store is Zarr v3 (one group per UTM zone, sharded, zstd). [zarrita](https://github.com/manzt/zarrita.js) reads it straight from `https://data.source.coop` with HTTP range requests. No server, no API key.
 - Only bands 0–63 are read. They form a complete 64-dimensional Matryoshka embedding and halve the download.
 - The window is aligned to the store's 256 px inner chunks, so each request is one chunk and nothing is wasted. A 7.7 km square is ~33 MB per year.
+- The overlay is drawn with [deck.gl-raster](https://github.com/developmentseed/deck.gl-raster). PCA colours and cosine distance are uploaded to the GPU once per comparison; the swipe position and change threshold are shader uniforms, so moving a slider only redraws. The UTM window is reprojected with an adaptive mesh rather than stretched over four corners.
+- deck.gl 9.4's interleaved mode reads `map.transform`, which MapLibre v6 made private; `MapView.tsx` re-exposes it. Check the overlay still draws after upgrading either library.
 - Values are dequantized with the README's signed square-root scheme (`sign(q)·(|q|/127.5)²`, `-128` = nodata) and L2-normalised before any comparison.
 
 Code map:
@@ -28,7 +30,8 @@ Code map:
 | `src/lib/embeddings.ts` | Zarr reads with progress |
 | `src/lib/grid.ts` | Lon/lat ↔ UTM pixel window, corner coordinates |
 | `src/lib/analysis.ts` | Dequantization, cosine distance, PCA colouring |
-| `src/components/MapView.tsx` | MapLibre map with the embedding overlay |
+| `src/lib/embeddingLayer.ts` | deck.gl-raster layer: GPU swipe and change-map shaders, UTM reprojection |
+| `src/components/MapView.tsx` | MapLibre map with the deck.gl overlay interleaved beneath the labels |
 
 ## Develop
 

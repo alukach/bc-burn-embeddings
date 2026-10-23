@@ -1,20 +1,21 @@
 import { useEffect, useRef } from "react";
 import * as maplibregl from "maplibre-gl";
-import type { ImageSource, StyleSpecification } from "maplibre-gl";
+import type { StyleSpecification } from "maplibre-gl";
+import { MapboxOverlay } from "@deck.gl/mapbox";
 import "maplibre-gl/dist/maplibre-gl.css";
 // MapLibre v6 loads its worker from a sibling file; point it at the copy Vite emits.
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
+import { EmbeddingLayer, type EmbeddingImages, type Mode } from "../lib/embeddingLayer";
+import { windowCorners } from "../lib/grid";
 
 maplibregl.setWorkerUrl(workerUrl);
 
-export interface Overlay {
-  rgba: Uint8ClampedArray;
-  size: number;
-  corners: [number, number][]; // TL, TR, BR, BL (lon, lat)
-}
-
 interface Props {
-  overlay: Overlay | null;
+  images: EmbeddingImages | null;
+  mode: Mode;
+  split: number;
+  vmax: number;
+  floor: number;
   opacity: number;
   center: [number, number];
   onHover?: (lngLat: [number, number] | null) => void;
@@ -47,25 +48,10 @@ const STYLE: StyleSpecification = {
   ],
 };
 
-const OVERLAY_ID = "embeddings";
-
-/** Encode RGBA pixels as a PNG object URL for MapLibre's image source. */
-async function toObjectUrl(o: Overlay): Promise<string> {
-  const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = o.size;
-  const ctx = canvas.getContext("2d")!;
-  ctx.putImageData(new ImageData(new Uint8ClampedArray(o.rgba), o.size, o.size), 0, 0);
-  const blob = await new Promise<Blob>((res, rej) =>
-    canvas.toBlob((b) => (b ? res(b) : rej(new Error("toBlob failed"))), "image/png"),
-  );
-  return URL.createObjectURL(blob);
-}
-
-export default function MapView({ overlay, opacity, center, onHover }: Props) {
+export default function MapView({ images, mode, split, vmax, floor, opacity, center, onHover }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
-  const loaded = useRef<Promise<void> | null>(null);
-  const lastUrl = useRef<string | null>(null);
+  const overlay = useRef<MapboxOverlay | null>(null);
   const fittedFor = useRef<string | null>(null);
   const hoverRef = useRef(onHover);
   hoverRef.current = onHover;
@@ -82,70 +68,52 @@ export default function MapView({ overlay, opacity, center, onHover }: Props) {
     m.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-right");
     m.on("mousemove", (ev: maplibregl.MapMouseEvent) => hoverRef.current?.([ev.lngLat.lng, ev.lngLat.lat]));
     m.on("mouseout", () => hoverRef.current?.(null));
-    loaded.current = new Promise((res) => m.on("load", () => res()));
+    // deck.gl 9.4's interleaved mode reads `map.transform.height`, which MapLibre v6 moved to a
+    // private camera object. Re-expose it so deck can size its viewport.
+    if (!("transform" in m))
+      Object.defineProperty(m, "transform", {
+        get: () => (m as unknown as { _camera: { transform: unknown } })._camera.transform,
+      });
+    // Interleaved so the overlay draws inside MapLibre's GL context, beneath the labels layer.
+    const o = new MapboxOverlay({ interleaved: true, layers: [] });
+    m.addControl(o);
     map.current = m;
+    overlay.current = o;
     return () => {
       m.remove();
       map.current = null;
+      overlay.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Push new overlay pixels. Encoding is async, so drop stale results.
+  // Slider changes only touch uniforms; textures are re-uploaded when `images` changes.
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const m = map.current;
-      if (!m || !overlay) return;
-      await loaded.current;
-      const url = await toObjectUrl(overlay);
-      if (cancelled || !map.current) return URL.revokeObjectURL(url);
-      const coords = overlay.corners as [
-        [number, number],
-        [number, number],
-        [number, number],
-        [number, number],
-      ];
-      const src = m.getSource(OVERLAY_ID) as ImageSource | undefined;
-      if (src) src.updateImage({ url, coordinates: coords });
-      else {
-        m.addSource(OVERLAY_ID, { type: "image", url, coordinates: coords });
-        m.addLayer(
-          {
-            id: OVERLAY_ID,
-            type: "raster",
-            source: OVERLAY_ID,
-            paint: { "raster-resampling": "nearest", "raster-fade-duration": 0, "raster-opacity": opacity },
-          },
-          "labels",
-        );
-      }
-      if (lastUrl.current) URL.revokeObjectURL(lastUrl.current);
-      lastUrl.current = url;
-      const key = JSON.stringify(overlay.corners);
-      if (fittedFor.current !== key) {
-        fittedFor.current = key;
-        const lons = overlay.corners.map((c) => c[0]);
-        const lats = overlay.corners.map((c) => c[1]);
-        m.fitBounds(
-          [
-            [Math.min(...lons), Math.min(...lats)],
-            [Math.max(...lons), Math.max(...lats)],
-          ],
-          { padding: 24, duration: 0 },
-        );
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overlay]);
+    overlay.current?.setProps({
+      layers: [
+        new EmbeddingLayer({ id: "embeddings", beforeId: "labels", images, mode, split, vmax, floor, opacity }),
+      ],
+    });
+  }, [images, mode, split, vmax, floor, opacity]);
 
   useEffect(() => {
     const m = map.current;
-    if (m?.getLayer(OVERLAY_ID)) m.setPaintProperty(OVERLAY_ID, "raster-opacity", opacity);
-  }, [opacity]);
+    if (!m || !images) return;
+    const w = images.window;
+    const key = `${w.zone}/${w.row0}/${w.col0}/${w.size}`;
+    if (fittedFor.current === key) return;
+    fittedFor.current = key;
+    const corners = windowCorners(w);
+    const lons = corners.map((c) => c[0]);
+    const lats = corners.map((c) => c[1]);
+    m.fitBounds(
+      [
+        [Math.min(...lons), Math.min(...lats)],
+        [Math.max(...lons), Math.max(...lats)],
+      ],
+      { padding: 24, duration: 0 },
+    );
+  }, [images]);
 
   return <div ref={el} className="map" />;
 }

@@ -23,28 +23,3 @@ export const infernoCss = (t: number) => {
   const [r, g, b] = INFERNO[Math.max(0, Math.min(255, Math.round(t * 255)))];
   return `rgb(${r},${g},${b})`;
 };
-
-/**
- * Map values to RGBA with a linear stretch from vmin..vmax. Values below `floor` are left
- * transparent so the basemap shows through unchanged areas. NaN is transparent.
- */
-export function scalarRgba(
-  values: Float32Array,
-  vmin: number,
-  vmax: number,
-  floor = -Infinity,
-): Uint8ClampedArray {
-  const out = new Uint8ClampedArray(values.length * 4);
-  const span = vmax - vmin || 1;
-  for (let p = 0; p < values.length; p++) {
-    const v = values[p];
-    if (!Number.isFinite(v) || v < floor) continue;
-    const i = Math.max(0, Math.min(255, Math.round(((v - vmin) / span) * 255)));
-    const [r, g, b] = INFERNO[i];
-    out[p * 4] = r;
-    out[p * 4 + 1] = g;
-    out[p * 4 + 2] = b;
-    out[p * 4 + 3] = 255;
-  }
-  return out;
-}

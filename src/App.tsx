@@ -1,17 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import MapView, { type Overlay } from "./components/MapView";
+import MapView from "./components/MapView";
 import Legend from "./components/Legend";
 import { DATASET_PAGE, FIRES, WINDOW_SIZES, YEARS, type Year } from "./config";
 import { loadYear, openZone, store, type YearEmbedding } from "./lib/embeddings";
-import { lonLatToUtm, windowAround, windowCorners, type PixelWindow } from "./lib/grid";
+import { lonLatToUtm, windowAround, type PixelWindow } from "./lib/grid";
 import { cosineDistance, fitPca, pcaRgba, quantile } from "./lib/analysis";
-import { scalarRgba } from "./lib/colormap";
-
-type Mode = "swipe" | "change";
+import type { EmbeddingImages, Mode } from "./lib/embeddingLayer";
 
 interface Result {
   window: PixelWindow;
-  corners: [number, number][];
   before: Uint8ClampedArray;
   after: Uint8ClampedArray;
   change: Float32Array;
@@ -81,7 +78,6 @@ export default function App() {
       const change = cosineDistance(eb, ea);
       const res: Result = {
         window: w,
-        corners: windowCorners(w),
         before: pcaRgba(eb, basis),
         after: pcaRgba(ea, basis),
         change,
@@ -105,24 +101,11 @@ export default function App() {
     run();
   }, [run]);
 
-  const overlay: Overlay | null = useMemo(() => {
-    if (!result) return null;
-    const n = result.window.size;
-    if (mode === "change") {
-      return { rgba: scalarRgba(result.change, 0, result.vmax, floor), size: n, corners: result.corners };
-    }
-    // Swipe: columns left of the split show "before", right show "after", with a thin divider.
-    const split = Math.round(swipe * n);
-    const out = new Uint8ClampedArray(result.after);
-    for (let y = 0; y < n; y++) {
-      const s = y * n * 4;
-      out.set(result.before.subarray(s, s + split * 4), s);
-      for (let x = Math.max(0, split - 1); x <= Math.min(n - 1, split); x++) {
-        out.set([255, 255, 255, 255], s + x * 4);
-      }
-    }
-    return { rgba: out, size: n, corners: result.corners };
-  }, [result, mode, swipe, floor]);
+  const images: EmbeddingImages | null = useMemo(
+    () =>
+      result && { window: result.window, before: result.before, after: result.after, change: result.change },
+    [result],
+  );
 
   const onHover = useCallback(
     (ll: [number, number] | null) => {
@@ -300,7 +283,16 @@ export default function App() {
         </footer>
       </aside>
       <main>
-        <MapView overlay={overlay} opacity={opacity} center={fire.center} onHover={onHover} />
+        <MapView
+          images={images}
+          mode={mode}
+          split={swipe}
+          vmax={result?.vmax ?? 1}
+          floor={floor}
+          opacity={opacity}
+          center={fire.center}
+          onHover={onHover}
+        />
       </main>
     </div>
   );

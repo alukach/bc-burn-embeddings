@@ -11,6 +11,16 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@deck.gl/core": "~9.4.0",
+    "@deck.gl/geo-layers": "~9.4.0",
+    "@deck.gl/layers": "~9.4.0",
+    "@deck.gl/mapbox": "~9.4.0",
+    "@deck.gl/mesh-layers": "~9.4.0",
+    "@developmentseed/deck.gl-raster": "^0.8.1",
+    "@developmentseed/morecantile": "^0.8.1",
+    "@luma.gl/core": "~9.4.0",
+    "@luma.gl/shadertools": "~9.4.0",
+    "@luma.gl/webgl": "~9.4.0",
     "maplibre-gl": "^6.15.0",
     "proj4": "^2.22.0",
     "react": "^19.3.1",
