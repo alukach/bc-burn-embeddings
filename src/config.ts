@@ -45,3 +45,18 @@ export const WINDOW_SIZES = [
   { chunks: 3, label: "7.7 km", approxMBPerYear: 33 },
   { chunks: 4, label: "10 km", approxMBPerYear: 58 },
 ] as const;
+
+/** Years of EOX's Sentinel-2 cloudless annual mosaics with the same layer naming (Web Mercator, zoom 0–14). */
+export const S2_CLOUDLESS_YEARS = [2018, 2019, 2020, 2021, 2022, 2023, 2024] as const;
+
+export const s2CloudlessUrl = (year: number) =>
+  `https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-${year}_3857/default/g/{z}/{y}/{x}.jpg`;
+
+/** Attribution EOX requires for each mosaic year. */
+export const s2CloudlessCredit = (year: number) =>
+  `Sentinel-2 cloudless - https://s2maps.eu by EOX IT Services GmbH (Contains modified Copernicus Sentinel data ${year})`;
+
+/** The mosaic closest to an embedding year (2017 uses 2018, which includes 2017 scenes; 2025 uses 2024). */
+export function nearestMosaic(year: number): number {
+  return S2_CLOUDLESS_YEARS.reduce((best, y) => (Math.abs(y - year) < Math.abs(best - year) ? y : best));
+}

@@ -61,3 +61,23 @@ export function windowCorners(w: PixelWindow): [number, number][] {
     utmToLonLat(w.zone, x0, y1),
   ];
 }
+
+/**
+ * The swipe divider as a meridian, so the embeddings and the satellite tiles split along the same
+ * line. `s` is the divider's position across the window (0..1) on its centre row. Returns the
+ * meridian's longitude and where it crosses the window's top and bottom edges, as fractions of
+ * the window width (UTM grid north differs from true north, so these differ slightly).
+ */
+export function swipeMeridian(w: PixelWindow, s: number) {
+  const { a, c, e, f } = w.transform;
+  const x0 = c + w.col0 * a;
+  const y0 = f + w.row0 * e;
+  const span = w.size * a;
+  const xs = x0 + s * span;
+  const [lon] = utmToLonLat(w.zone, xs, y0 + (w.size / 2) * e);
+  const uAt = (v: number) => {
+    const [, lat] = utmToLonLat(w.zone, xs, y0 + v * w.size * e);
+    return (lonLatToUtm(w.zone, lon, lat)[0] - x0) / span;
+  };
+  return { lon, uTop: uAt(0), uBottom: uAt(1) };
+}

@@ -18,8 +18,9 @@ export type Mode = "swipe" | "change";
 export interface EmbeddingLayerProps extends CompositeLayerProps {
   images: EmbeddingImages | null;
   mode: Mode;
-  /** Swipe position, 0..1 across the window. */
-  split: number;
+  /** Swipe divider: where it crosses the window's top and bottom edges, 0..1 across the window. */
+  splitTop: number;
+  splitBottom: number;
   /** Top of the colour ramp for the change map. */
   vmax: number;
   /** Change values below this are hidden. */
@@ -28,26 +29,29 @@ export interface EmbeddingLayerProps extends CompositeLayerProps {
   beforeId?: string;
 }
 
-type SwipeProps = { beforeTex: Texture; afterTex: Texture; split: number; px: number };
+type SwipeProps = { beforeTex: Texture; afterTex: Texture; splitTop: number; splitBottom: number };
 
-/** Left of `split` samples the before image, right samples after, with a 2-pixel white divider. */
+/**
+ * Left of the divider samples the before image, right samples after. The divider runs from
+ * `splitTop` to `splitBottom` so it follows a meridian across the UTM grid.
+ */
 const Swipe = {
   name: "swipe",
-  fs: "uniform swipeUniforms {\n  float split;\n  float px;\n} swipe;\n",
+  fs: "uniform swipeUniforms {\n  float splitTop;\n  float splitBottom;\n} swipe;\n",
   inject: {
     "fs:#decl": "uniform sampler2D beforeTex;\nuniform sampler2D afterTex;\n",
     "fs:DECKGL_FILTER_COLOR": `
-      color = geometry.uv.x < swipe.split ? texture(beforeTex, geometry.uv) : texture(afterTex, geometry.uv);
-      if (abs(geometry.uv.x - swipe.split) < swipe.px) color = vec4(1.0);
+      float split = mix(swipe.splitTop, swipe.splitBottom, geometry.uv.y);
+      color = geometry.uv.x < split ? texture(beforeTex, geometry.uv) : texture(afterTex, geometry.uv);
       if (color.a == 0.0) discard;
     `,
   },
-  uniformTypes: { split: "f32", px: "f32" },
+  uniformTypes: { splitTop: "f32", splitBottom: "f32" },
   getUniforms: (p: Partial<SwipeProps>) => ({
     beforeTex: p.beforeTex,
     afterTex: p.afterTex,
-    split: p.split ?? 0.5,
-    px: p.px ?? 0,
+    splitTop: p.splitTop ?? 0.5,
+    splitBottom: p.splitBottom ?? 0.5,
   }),
 } as const satisfies ShaderModule<SwipeProps>;
 
@@ -159,13 +163,13 @@ export class EmbeddingLayer extends CompositeLayer<EmbeddingLayerProps> {
   }
 
   renderLayers() {
-    const { images, mode, split, vmax, floor } = this.props;
+    const { images, mode, splitTop, splitBottom, vmax, floor } = this.props;
     const { textures, lut, reprojectionFns } = this.state;
     if (!images || !textures || !lut || !reprojectionFns) return null;
     const n = images.window.size;
     const pipeline: RasterModule[] =
       mode === "swipe"
-        ? [{ module: Swipe, props: { beforeTex: textures.before, afterTex: textures.after, split, px: 1 / n } }]
+        ? [{ module: Swipe, props: { beforeTex: textures.before, afterTex: textures.after, splitTop, splitBottom } }]
         : [{ module: Change, props: { changeTex: textures.change, lutTex: lut, vmax, floor } }];
     return new RasterLayer(
       this.getSubLayerProps({

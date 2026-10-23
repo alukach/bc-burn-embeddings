@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MapView from "./components/MapView";
 import Legend from "./components/Legend";
-import { DATASET_PAGE, FIRES, WINDOW_SIZES, YEARS, type Year } from "./config";
+import { DATASET_PAGE, FIRES, WINDOW_SIZES, YEARS, nearestMosaic, s2CloudlessCredit, type Year } from "./config";
 import { loadYear, openZone, store, type YearEmbedding } from "./lib/embeddings";
 import { lonLatToUtm, windowAround, type PixelWindow } from "./lib/grid";
 import { cosineDistance, fitPca, pcaRgba, quantile } from "./lib/analysis";
@@ -32,6 +32,7 @@ export default function App() {
   const [chunks, setChunks] = useState<number>(3);
   const [mode, setMode] = useState<Mode>("swipe");
   const [swipe, setSwipe] = useState(0.5);
+  const [showEmbeddings, setShowEmbeddings] = useState(true);
   const [opacity, setOpacity] = useState(0.9);
   const [floor, setFloor] = useState(0);
   const [result, setResult] = useState<Result | null>(null);
@@ -120,6 +121,9 @@ export default function App() {
     [result],
   );
 
+  const beforeMosaic = nearestMosaic(before);
+  const afterMosaic = nearestMosaic(after);
+
   const sizeInfo = WINDOW_SIZES.find((s) => s.chunks === chunks)!;
   const pct = progress ? Math.round((100 * progress.done) / Math.max(progress.total, 1)) : 0;
 
@@ -191,6 +195,14 @@ export default function App() {
 
           {mode === "swipe" ? (
             <>
+              <div className="segmented small-seg" role="tablist" aria-label="Swipe layer">
+                <button className={showEmbeddings ? "on" : ""} onClick={() => setShowEmbeddings(true)}>
+                  Embeddings
+                </button>
+                <button className={showEmbeddings ? "" : "on"} onClick={() => setShowEmbeddings(false)}>
+                  Satellite
+                </button>
+              </div>
               <label className="slider">
                 <span>
                   ← {before} | {after} →
@@ -204,11 +216,22 @@ export default function App() {
                   onChange={(e) => setSwipe(Number(e.target.value))}
                 />
               </label>
-              <p className="muted small">
-                Colours are the top three principal components of the embeddings, fitted on both
-                years together. Similar colours mean similar land cover; the colour itself has no
-                fixed meaning.
-              </p>
+              {showEmbeddings ? (
+                <p className="muted small">
+                  Colours are the top three principal components of the embeddings, fitted on both
+                  years together. Similar colours mean similar land cover; the colour itself has no
+                  fixed meaning. Lower the opacity, or switch to Satellite, to check them against
+                  the imagery underneath.
+                </p>
+              ) : (
+                <p className="muted small">
+                  Sentinel-2 cloudless mosaics for {beforeMosaic} and {afterMosaic}
+                  {(beforeMosaic !== before || afterMosaic !== after) &&
+                    ` (nearest available to ${before} and ${after})`}
+                  , split along the same line as the embeddings. Where the imagery changes, the
+                  embedding colours should change too.
+                </p>
+              )}
             </>
           ) : (
             result && (
@@ -234,17 +257,19 @@ export default function App() {
             )
           )}
 
-          <label className="slider">
-            <span>Overlay opacity</span>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={opacity}
-              onChange={(e) => setOpacity(Number(e.target.value))}
-            />
-          </label>
+          {(mode === "change" || showEmbeddings) && (
+            <label className="slider">
+              <span>Overlay opacity</span>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={opacity}
+                onChange={(e) => setOpacity(Number(e.target.value))}
+              />
+            </label>
+          )}
         </section>
 
         <section className="status" aria-live="polite">
@@ -280,6 +305,14 @@ export default function App() {
           </a>{" "}
           (Ai2, OlmoEarth Artifact License) on Source Cooperative. Read live in your browser from
           the Zarr store.
+          {mode === "swipe" && (
+            <>
+              {" "}
+              Imagery: {s2CloudlessCredit(beforeMosaic)}
+              {afterMosaic !== beforeMosaic && `; ${s2CloudlessCredit(afterMosaic)}`}. Licensed CC
+              BY-NC-SA 4.0.
+            </>
+          )}
         </footer>
       </aside>
       <main>
@@ -290,6 +323,9 @@ export default function App() {
           vmax={result?.vmax ?? 1}
           floor={floor}
           opacity={opacity}
+          showEmbeddings={showEmbeddings}
+          beforeMosaic={beforeMosaic}
+          afterMosaic={afterMosaic}
           center={fire.center}
           onHover={onHover}
         />
